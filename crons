@@ -1,0 +1,2 @@
+@reboot /home/ldd/domainbinder/domainbinder
+*/5 * * * * /home/ldd/domainbinder/domainbinder

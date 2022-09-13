@@ -1,0 +1,241 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+import hmac
+import hashlib
+import base64
+from urllib import parse, request, error
+import random
+import time
+import config
+import json
+import traceback
+import logging
+import os
+
+
+class DnsApi:
+    __api_path = "cns.api.qcloud.com/v2/index.php"
+
+    def __init__(self, secret_key, secret_id):
+        self.secret_key = secret_key
+        self.secret_id = secret_id
+        params = "Nonce={nonce}&SecretId={secretId}&SignatureMethod=HmacSHA256&Timestamp={timestamp}"
+        nonce = random.randint(100000000, 999999999)
+        now_ts = int(time.time())
+        self.params = params.format(
+            nonce=nonce, secretId=secret_id, timestamp=now_ts)
+
+    def fetch(func):
+        def __wrapper(self, *args, **kwargs):
+            params = func(self, *args, **kwargs)
+            params = "&".join(sorted(params.split("&")))
+
+            src_str = "GET" + self.__api_path + "?" + params
+            signature = base64.b64encode(hmac.new(
+                self.secret_key.encode(),
+                msg=src_str.encode(),
+                digestmod=hashlib.sha256
+            ).digest())
+            signature = parse.quote_plus(signature.decode('latin-1'))
+
+            param_map = {}
+            for kv in params.split("&"):
+                k, v = kv.split("=")
+                param_map[k] = v
+            params = parse.urlencode(param_map)
+
+            url = "https://" + self.__api_path + "?" + params + "&Signature=" + signature
+            res = request.urlopen(url).read()
+            return json.loads(res.decode("utf-8"))
+        return __wrapper
+
+    @fetch
+    def DomainList(self):
+        return self.params + "&Action=DomainList"
+
+    @fetch
+    def RecordList(self, domain, **optionals):
+        params = self.params + \
+            "&domain={domain}&Action=RecordList".format(domain=domain)
+        for k, v in optionals.items():
+            params += '&' + k + '=' + v
+        return params
+
+    @fetch
+    def RecordModify(self, fullDomain, value, recordType="A", recordLine="默认", **optionals):
+        firstDotIndex = fullDomain.find(".")
+        subDomain = fullDomain[0:firstDotIndex]
+        domain = fullDomain[firstDotIndex+1:]
+
+        res = self.RecordList(domain)
+        if res["codeDesc"] != "Success":
+            raise ValueError("wrong fullDomain value: " + fullDomain)
+
+        def __get_record_id(res):
+            for item in res["data"]["records"]:
+                if subDomain == item["name"] and recordType == item["type"]:
+                    return item["id"]
+            return ""
+
+        recId = __get_record_id(res)
+
+        params = self.params + "&value=" + value + \
+            "&recordLine=" + recordLine + \
+            "&recordType=" + recordType + \
+            "&recordId=" + str(recId) + \
+            "&subDomain=" + subDomain + \
+            "&domain=" + domain + \
+            "&Action=RecordModify"
+        for k, v in optionals.items():
+            params += '&' + k + '=' + v
+
+        return params
+
+
+class Router:
+    SYN = 0
+    ASYN = 1
+    TDDP_INSTRUCT = 0
+    TDDP_WRITE = 1
+    TDDP_READ = 2
+    TDDP_UPLOAD = 3
+    TDDP_DOWNLOAD = 4
+    TDDP_RESET = 5
+    TDDP_REBOOT = 6
+    TDDP_AUTH = 7
+    TDDP_GETPEERMAC = 8
+    TDDP_CONFIG = 9
+    TDDP_CHGPWD = 10
+    TDDP_LOGOUT = 11
+    PARSE_INIT = 0
+    PARSE_NOTE = 1
+    PARSE_CMD = 2
+    PARSE_ID = 3
+    PARSE_INDEX = 4
+    PARSE_VALUE = 5
+    PARSE_ERR = 6
+
+    host = "http://192.168.0.1/"
+
+    @staticmethod
+    def post(code, asyn, sessionId=None, payload=None):
+        data = {
+            "code": code,
+            "asyn": asyn,
+        }
+        if sessionId != None:
+            data["id"] = sessionId
+
+        param = parse.urlencode(data)
+        # print(Router.host + "?" + param)
+
+        try:
+            url = Router.host + "?" + param
+            req = request.Request(url, data=payload, method="POST")
+            res = request.urlopen(req)
+            return res.read()
+        except error.HTTPError as e:
+            # print(e.code)
+            if e.code == 401:
+                # print("Unauthorized")
+                return e.read()
+        return None
+
+    @staticmethod
+    def securityEncode(a, b, c):
+        d = ""
+        k = 187
+        l = 187
+        f = len(a)
+        h = len(b)
+        m = len(c)
+        e = f if f > h else h
+        for g in range(e):
+            l = k = 187
+
+            if g >= f:
+                l = ord(b[g])
+            elif g >= h:
+                k = ord(a[g])
+            else:
+                k = ord(a[g])
+                l = ord(b[g])
+            d += c[(k ^ l) % m]
+        return d
+
+    def login(self, passwd):
+        sec_pwd = Router.securityEncode(
+            passwd, "RDpbLfCPsJZ7fiv", "yLwVl0zKqws7LgKPRQ84Mdt708T1qQ3Ha7xv3H7NyU84p21BriUWBU43odz3iP4rBL3cD02KZciXTysVXiV8ngg6vL48rPJyAUw0HurW20xqxv9aYb4M9wK1Ae0wlro510qXeU07kV57fQMc8L6aLgMLwygtc0F10a0Dg70TOoouyFhdysuRMO51yY5ZlOZZLEal1h0t9YQW0Ko7oBwmCAHoic4HYbUyVeU3sfQ1xtXcPcf1aT303wAQhv66qzW")
+        # print(sec_pwd)
+        res = Router.post(Router.TDDP_READ, 1).decode()
+        data = res.split("\r\n")
+        sessionId = Router.securityEncode(data[3], sec_pwd, data[4])
+        res = Router.post(Router.TDDP_AUTH, 0, sessionId)
+        if res.decode() == "00000\r\n":
+            self.sessionId = sessionId
+            return True
+        return False
+
+    def get_ip(self):
+        res = Router.post(Router.TDDP_READ, 0, self.sessionId, payload=b"23")
+        lines = res.decode().split("\r\n")
+        for ln in lines:
+            if ln.startswith("ip "):
+                return ln[len("ip "):]
+        return ""
+
+
+def update_ip():
+    ip = ""
+    router_ip_file = config.router_ip_file
+    try:
+        with open(router_ip_file) as f:
+            ip = f.read().strip()
+    except:
+        pass
+
+    # 获取自己的公网 IP
+    # curl icanhazip.com
+    router_ip = os.popen("curl -s icanhazip.com").read().strip()
+    logging.info("router public ip: %s, domain ip: %s", router_ip, ip)
+    if router_ip != ip:
+        ip = router_ip
+        dns_api = DnsApi(config.secret_key, config.secret_id)
+        res = dns_api.RecordModify("pi.ldd.cool", ip)
+        logging.debug("%s", json.dumps(res))
+        with open(router_ip_file, "w") as f:
+            f.write(ip + "\n")
+        logging.info("DNS A record updated")
+    # 利用路由器 API 获取公网 IP
+    # rt = Router()
+    # if rt.login(config.router_login_passwd):
+    #     router_ip = rt.get_ip()
+    #     logging.info("router public ip: %s, domain ip: %s", router_ip, ip)
+    #     if router_ip != ip:
+    #         ip = router_ip
+    #         dns_api = DnsApi(config.secret_key, config.secret_id)
+    #         res = dns_api.RecordModify("*.ldd.cool", ip)
+    #         logging.debug("%s", json.dumps(res))
+    #         with open(router_ip_file, "w") as f:
+    #             f.write(ip + "\n")
+    #         logging.info("DNS A record updated")
+
+
+if __name__ == "__main__":
+    logging.basicConfig(filename=config.log_file, level=logging.INFO, format="%(asctime)s-%(process)d-%(levelname)s => %(message)s")
+    update_ip()
+
+    # Test 1
+    # dns_api = DnsApi(config.secret_key, config.secret_id)
+    # dns_api.DomainList()
+
+    # dns_api.RecordList("ldd.cool")
+
+    # res = dns_api.RecordModify("*.ldd.cool", "61.144.116.202")
+    # print(res)
+
+    # Test 2
+    # rt = Router()
+    # if rt.login(config.router_login_passwd):
+    #     print(rt.get_ip())
