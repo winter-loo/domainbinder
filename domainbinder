@@ -160,6 +160,7 @@ if __name__ == "__main__":
 
     logging.basicConfig(filename=config.log_file, level=logging.INFO, format="%(asctime)s-%(process)d-%(levelname)s => %(message)s")
     update_ip()
+    display.stop()
 
     # Test 1
     # dns_api = DnsApi(config.secret_key, config.secret_id)

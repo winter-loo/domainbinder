@@ -44,3 +44,4 @@ el = web.find_element(By.XPATH, '//*[@id="index"]/div[3]/div/div[3]/div/div[3]/p
 print(el.text)
 
 web.quit()
+display.stop()
