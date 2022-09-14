@@ -1,6 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+#
+# Contents of config.py
+#
+# secret_key = "xwb6QU7TefPvZz2rUx4rOjyzHItMQDkE"
+# secret_id = "xKIDylJabSs8IBnNXRR8p58vRX5OUQ3rpzJ"
+# router_login_passwd = "welcome@pi.ldd.cool:)"
+# router_ip_file = "/home/ldd/domainbinder/router-ip"
+# log_file = "/home/ldd/domainbinder/app.log"
+#
+
 import hmac
 import hashlib
 import base64
@@ -12,7 +22,11 @@ import json
 import traceback
 import logging
 import os
-
+from selenium.webdriver import Chrome
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.chrome.options import Options
+from pyvirtualdisplay import Display
 
 class DnsApi:
     __api_path = "cns.api.qcloud.com/v2/index.php"
@@ -92,98 +106,27 @@ class DnsApi:
 
         return params
 
-
-class Router:
-    SYN = 0
-    ASYN = 1
-    TDDP_INSTRUCT = 0
-    TDDP_WRITE = 1
-    TDDP_READ = 2
-    TDDP_UPLOAD = 3
-    TDDP_DOWNLOAD = 4
-    TDDP_RESET = 5
-    TDDP_REBOOT = 6
-    TDDP_AUTH = 7
-    TDDP_GETPEERMAC = 8
-    TDDP_CONFIG = 9
-    TDDP_CHGPWD = 10
-    TDDP_LOGOUT = 11
-    PARSE_INIT = 0
-    PARSE_NOTE = 1
-    PARSE_CMD = 2
-    PARSE_ID = 3
-    PARSE_INDEX = 4
-    PARSE_VALUE = 5
-    PARSE_ERR = 6
-
-    host = "http://192.168.0.1/"
-
-    @staticmethod
-    def post(code, asyn, sessionId=None, payload=None):
-        data = {
-            "code": code,
-            "asyn": asyn,
-        }
-        if sessionId != None:
-            data["id"] = sessionId
-
-        param = parse.urlencode(data)
-        # print(Router.host + "?" + param)
-
-        try:
-            url = Router.host + "?" + param
-            req = request.Request(url, data=payload, method="POST")
-            res = request.urlopen(req)
-            return res.read()
-        except error.HTTPError as e:
-            # print(e.code)
-            if e.code == 401:
-                # print("Unauthorized")
-                return e.read()
-        return None
-
-    @staticmethod
-    def securityEncode(a, b, c):
-        d = ""
-        k = 187
-        l = 187
-        f = len(a)
-        h = len(b)
-        m = len(c)
-        e = f if f > h else h
-        for g in range(e):
-            l = k = 187
-
-            if g >= f:
-                l = ord(b[g])
-            elif g >= h:
-                k = ord(a[g])
-            else:
-                k = ord(a[g])
-                l = ord(b[g])
-            d += c[(k ^ l) % m]
-        return d
-
-    def login(self, passwd):
-        sec_pwd = Router.securityEncode(
-            passwd, "RDpbLfCPsJZ7fiv", "yLwVl0zKqws7LgKPRQ84Mdt708T1qQ3Ha7xv3H7NyU84p21BriUWBU43odz3iP4rBL3cD02KZciXTysVXiV8ngg6vL48rPJyAUw0HurW20xqxv9aYb4M9wK1Ae0wlro510qXeU07kV57fQMc8L6aLgMLwygtc0F10a0Dg70TOoouyFhdysuRMO51yY5ZlOZZLEal1h0t9YQW0Ko7oBwmCAHoic4HYbUyVeU3sfQ1xtXcPcf1aT303wAQhv66qzW")
-        # print(sec_pwd)
-        res = Router.post(Router.TDDP_READ, 1).decode()
-        data = res.split("\r\n")
-        sessionId = Router.securityEncode(data[3], sec_pwd, data[4])
-        res = Router.post(Router.TDDP_AUTH, 0, sessionId)
-        if res.decode() == "00000\r\n":
-            self.sessionId = sessionId
-            return True
-        return False
-
-    def get_ip(self):
-        res = Router.post(Router.TDDP_READ, 0, self.sessionId, payload=b"23")
-        lines = res.decode().split("\r\n")
-        for ln in lines:
-            if ln.startswith("ip "):
-                return ln[len("ip "):]
-        return ""
+def HwTC7102_RouterWanIP():
+    options = Options()
+    options.add_argument("--headless")
+    options.add_argument("--disable-gpu")
+    
+    web = Chrome(options=options)
+    
+    web.get('http://192.168.2.1/html/index.html#/login')
+    
+    time.sleep(1)
+    
+    web.find_element(By.ID, 'userpassword_ctrl').send_keys(config.router_login_passwd, Keys.ENTER)
+    
+    time.sleep(1)
+    
+    # wan ip
+    el = web.find_element(By.XPATH, '//*[@id="index"]/div[3]/div/div[3]/div/div[3]/p[2]')
+    wan_ip = el.text
+    
+    web.quit()
+    return wan_ip
 
 
 def update_ip():
@@ -197,7 +140,8 @@ def update_ip():
 
     # 获取自己的公网 IP
     # curl icanhazip.com
-    router_ip = os.popen("curl -s icanhazip.com").read().strip()
+    # router_ip = os.popen("curl -s icanhazip.com").read().strip()
+    router_ip = HwTC7102_RouterWanIP()
     logging.info("router public ip: %s, domain ip: %s", router_ip, ip)
     if router_ip != ip:
         ip = router_ip
@@ -207,22 +151,13 @@ def update_ip():
         with open(router_ip_file, "w") as f:
             f.write(ip + "\n")
         logging.info("DNS A record updated")
-    # 利用路由器 API 获取公网 IP
-    # rt = Router()
-    # if rt.login(config.router_login_passwd):
-    #     router_ip = rt.get_ip()
-    #     logging.info("router public ip: %s, domain ip: %s", router_ip, ip)
-    #     if router_ip != ip:
-    #         ip = router_ip
-    #         dns_api = DnsApi(config.secret_key, config.secret_id)
-    #         res = dns_api.RecordModify("*.ldd.cool", ip)
-    #         logging.debug("%s", json.dumps(res))
-    #         with open(router_ip_file, "w") as f:
-    #             f.write(ip + "\n")
-    #         logging.info("DNS A record updated")
 
 
 if __name__ == "__main__":
+    # chrome_webdriver need display
+    display = Display(visible=0, size=(800, 600))
+    display.start()
+
     logging.basicConfig(filename=config.log_file, level=logging.INFO, format="%(asctime)s-%(process)d-%(levelname)s => %(message)s")
     update_ip()
 
