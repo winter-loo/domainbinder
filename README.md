@@ -8,6 +8,7 @@ pip freeze > requirements.txt
 ```shell
 python3 -m venv .venv
 pip install -r requirements.txt
+sudo apt install chromium-driver
 ```
 
 ```shell

@@ -1,5 +1,6 @@
 app.log
 router-ip
+router.ip
 .venv/
 __pycache__/
 config.py

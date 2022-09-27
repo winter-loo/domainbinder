@@ -35,6 +35,7 @@ web.get(urls['login_page'])
 
 time.sleep(1)
 
+# send_keys buggy in kali linux chromium webdriver
 web.find_element(By.ID, 'userpassword_ctrl').send_keys(config.router_login_passwd, Keys.ENTER)
 
 time.sleep(1)

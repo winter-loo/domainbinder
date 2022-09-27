@@ -22,11 +22,14 @@ import json
 import traceback
 import logging
 import os
-from selenium.webdriver import Chrome
-from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.chrome.options import Options
-from pyvirtualdisplay import Display
+import requests
+import js2py
+from bs4 import BeautifulSoup
+# from selenium.webdriver import Chrome
+# from selenium.webdriver.common.by import By
+# from selenium.webdriver.common.keys import Keys
+# from selenium.webdriver.chrome.options import Options
+# from pyvirtualdisplay import Display
 
 class DnsApi:
     __api_path = "cns.api.qcloud.com/v2/index.php"
@@ -84,7 +87,7 @@ class DnsApi:
 
         res = self.RecordList(domain)
         if res["codeDesc"] != "Success":
-            raise ValueError("wrong fullDomain value: " + fullDomain)
+            raise ValueError(res)
 
         def __get_record_id(res):
             for item in res["data"]["records"]:
@@ -106,27 +109,88 @@ class DnsApi:
 
         return params
 
+#### has bug when runs on kali linux as of chromium driver `send_keys` function
+# def HwTC7102_RouterWanIP():
+#     options = Options()
+#     options.add_argument("--headless")
+#     options.add_argument("--disable-gpu")
+#     
+#     web = Chrome(options=options)
+#     
+#     web.get('http://192.168.2.1/html/index.html#/login')
+#     
+#     time.sleep(1)
+#     
+#     web.find_element(By.ID, 'userpassword_ctrl').send_keys(config.router_login_passwd, Keys.ENTER)
+#     
+#     time.sleep(1)
+#     
+#     # wan ip
+#     el = web.find_element(By.XPATH, '//*[@id="index"]/div[3]/div/div[3]/div/div[3]/p[2]')
+#     wan_ip = el.text
+#     
+#     web.quit()
+#     return wan_ip
+
+urls = {
+    'login_page': 'http://192.168.2.1/html/index.html#/login',
+    'user_login_nonce': 'http://192.168.2.1/api/system/user_login_nonce',
+    'user_login_proof': 'http://192.168.2.1/api/system/user_login_proof',
+    'wandetect': 'http://192.168.2.1/api/ntwk/wandetect'
+}
 def HwTC7102_RouterWanIP():
-    options = Options()
-    options.add_argument("--headless")
-    options.add_argument("--disable-gpu")
+    session = requests.session()
+    res = session.get(urls['login_page'])
+    html = BeautifulSoup(res.text, features="html.parser")
+    csrf_param = html.find('meta', attrs = {'name': 'csrf_param'})['content']
+    csrf_token = html.find('meta', attrs = {'name': 'csrf_token'})['content']
+    csrf = {
+        "csrf_param": csrf_param,
+        "csrf_token": csrf_token
+    }
     
-    web = Chrome(options=options)
+    cat_enc_js = ""
+    login_nonce_js = ""
+    login_proof_js = ""
+    with open('js/cat_enc.js') as f:
+        cat_enc_js = f.read()
+    with open('js/login_nonce.js') as f:
+        login_nonce_js = f.read()
+    with open('js/login_proof.js') as f:
+        login_proof_js = f.read()
     
-    web.get('http://192.168.2.1/html/index.html#/login')
+    encjs = js2py.eval_js(f'{cat_enc_js}\n{login_nonce_js}').to_dict()
+    data = {
+        "data": encjs["data"],
+        "csrf": csrf
+    }
     
-    time.sleep(1)
+    # print(json.dumps(data))
+    login_nonce_res = session.post(urls['user_login_nonce'], json=data).text
+    js = f"""
+    {cat_enc_js}
+    var scram = CryptoJS.SCRAM({{keySize: 8}});
+    var password="{config.router_login_passwd}";
+    var firstNonce="{data["data"]["firstnonce"]}";
+    var res={login_nonce_res};
+    {login_proof_js}
+    """
+    param1 = js2py.eval_js(js).to_dict()
     
-    web.find_element(By.ID, 'userpassword_ctrl').send_keys(config.router_login_passwd, Keys.ENTER)
+    # update csrf and data
+    jres = json.loads(login_nonce_res)
+    csrf = {
+        "csrf_token": jres["csrf_token"],
+        "csrf_param": jres["csrf_param"]
+    }
+    data = {
+        "data": param1["data"],
+        "csrf": csrf
+    }
     
-    time.sleep(1)
-    
-    # wan ip
-    el = web.find_element(By.XPATH, '//*[@id="index"]/div[3]/div/div[3]/div/div[3]/p[2]')
-    wan_ip = el.text
-    
-    web.quit()
-    return wan_ip
+    session.post(url=urls['user_login_proof'], json=data)
+    res = session.get(url=urls['wandetect']).text
+    return json.loads(res)["ExternalIPAddress"]
 
 
 def update_ip():
@@ -155,12 +219,12 @@ def update_ip():
 
 if __name__ == "__main__":
     # chrome_webdriver need display
-    display = Display(visible=0, size=(800, 600))
-    display.start()
+    # display = Display(visible=0, size=(800, 600))
+    # display.start()
 
     logging.basicConfig(filename=config.log_file, level=logging.INFO, format="%(asctime)s-%(process)d-%(levelname)s => %(message)s")
     update_ip()
-    display.stop()
+    # display.stop()
 
     # Test 1
     # dns_api = DnsApi(config.secret_key, config.secret_id)
