@@ -9,6 +9,7 @@
 # router_login_passwd = "welcome@pi.ldd.cool:)"
 # router_ip_file = "/home/ldd/domainbinder/router-ip"
 # log_file = "/home/ldd/domainbinder/app.log"
+# get_public_ip_from_internet = True
 #
 
 import hmac
@@ -203,9 +204,11 @@ def update_ip():
         pass
 
     # 获取自己的公网 IP
-    # curl icanhazip.com
-    # router_ip = os.popen("curl -s icanhazip.com").read().strip()
-    router_ip = HwTC7102_RouterWanIP()
+    # curl ipv4.icanhazip.com
+    if config.get_public_ip_from_internet:
+      router_ip = os.popen("curl -s ipv4.icanhazip.com").read().strip()
+    else:
+      router_ip = HwTC7102_RouterWanIP()
     logging.info("router public ip: %s, domain ip: %s", router_ip, ip)
     if router_ip != ip:
         ip = router_ip
